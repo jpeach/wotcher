@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -91,6 +92,15 @@ func InformOnMatchingResources(r *k.Reader, matches []string) error {
 	return nil
 }
 
+func StringFlagOrDie(cmd *cobra.Command, name string) string {
+	value, err := cmd.Flags().GetString(name)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	return value
+}
+
 // NewWatcher ...
 func NewWatcher() *cobra.Command {
 	cmd := cobra.Command{
@@ -100,6 +110,14 @@ func NewWatcher() *cobra.Command {
 		SilenceErrors: true, // Don't print errors twice.
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s := k.NewScheme(capi.AddToScheme)
+
+			// Manually parse the `kubeconfig` flag so
+			// that controller-runtime config loader can
+			// access is using the go `flag` package.
+			flag.CommandLine.Parse([]string{
+				"--kubeconfig",
+				StringFlagOrDie(cmd, "kubeconfig"),
+			})
 
 			r, err := k.NewReaderForScheme(s)
 			if err != nil {
@@ -133,5 +151,6 @@ func NewWatcher() *cobra.Command {
 		},
 	}
 
+	cmd.Flags().String("kubeconfig", "", "paths to a kubeconfig; only required if out-of-cluster")
 	return &cmd
 }
