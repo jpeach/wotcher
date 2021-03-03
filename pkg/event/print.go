@@ -24,8 +24,8 @@ func printOp(op string, obj interface{}) {
 	fmt.Printf("%s %s %s %s %s\n",
 		timestamp(time.Now()),
 		op,
-		kobj.GetObjectKind().GroupVersionKind().GroupVersion(),
 		kobj.GetObjectKind().GroupVersionKind().GroupKind().Kind,
+		kobj.GetObjectKind().GroupVersionKind().GroupVersion(),
 		k.NamespacedNameOf(kobj),
 	)
 }
