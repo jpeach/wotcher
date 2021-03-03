@@ -1,25 +1,56 @@
 package k
 
 import (
-	"k8s.io/apimachinery/pkg/api/meta"
+	"strings"
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/restmapper"
+	"k8s.io/client-go/tools/cache"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
+)
+
+const (
+	DefaultResyncPeriod = 10 * time.Minute
 )
 
 // Reader provides read-only access to Kubernetes resources.
 type Reader struct {
-	Conf      *rest.Config
-	Cache     cache.Cache
-	Mapper    meta.RESTMapper
-	Discovery *discovery.DiscoveryClient
+	Conf            *rest.Config
+	Discovery       *discovery.DiscoveryClient
+	InformerFactory dynamicinformer.DynamicSharedInformerFactory
+}
+
+func (r *Reader) InformOnResource(gvr schema.GroupVersionResource, handler cache.ResourceEventHandler) {
+	i := r.InformerFactory.ForResource(gvr)
+	i.Informer().AddEventHandler(handler)
+}
+
+func (r *Reader) Run(stopChan <-chan struct{}) {
+	r.InformerFactory.Start(stopChan)
+
+	// Block until the channel closes and all the informers are done.
+	<-stopChan
+}
+
+func IsSubResource(resource string) bool {
+	return strings.Contains(resource, "/")
+}
+
+func NamespacedNameOf(u *unstructured.Unstructured) types.NamespacedName {
+	return types.NamespacedName{
+		Namespace: u.GetNamespace(),
+		Name:      u.GetName(),
+	}
 }
 
 // NewScheme ...
@@ -34,26 +65,6 @@ func NewScheme(addTo ...func(*runtime.Scheme) error) *runtime.Scheme {
 	}
 
 	return s
-}
-
-// NewClientForScheme returns a new Kubernetes client that uses the given scheme.
-func NewClientForScheme(s *runtime.Scheme) (client.Client, error) {
-	conf, err := ctrl.GetConfig()
-	if err != nil {
-		return nil, err
-	}
-
-	mapper, err := apiutil.NewDiscoveryRESTMapper(conf)
-	if err != nil {
-		return nil, err
-	}
-
-	return client.New(conf,
-		client.Options{
-			Scheme: s,
-			Mapper: mapper,
-		},
-	)
 }
 
 // NewReaderForScheme returns a new informer cache that uses the given scheme.
@@ -71,22 +82,18 @@ func NewReaderForScheme(s *runtime.Scheme) (*Reader, error) {
 		return nil, err
 	}
 
-	gr, err := restmapper.GetAPIGroupResources(reader.Discovery)
+	dynamicClient, err := dynamic.NewForConfig(reader.Conf)
 	if err != nil {
 		return nil, err
 	}
 
-	reader.Mapper = restmapper.NewDiscoveryRESTMapper(gr)
-
-	reader.Cache, err = cache.New(reader.Conf,
-		cache.Options{
-			Scheme:    s,
-			Mapper:    reader.Mapper,
-			Namespace: metav1.NamespaceAll,
-		})
-	if err != nil {
-		return nil, err
-	}
+	reader.InformerFactory = dynamicinformer.NewFilteredDynamicSharedInformerFactory(
+		dynamicClient,
+		DefaultResyncPeriod,
+		corev1.NamespaceAll,
+		func(options *metav1.ListOptions) {
+		},
+	)
 
 	return &reader, nil
 }

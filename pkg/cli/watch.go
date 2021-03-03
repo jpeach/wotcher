@@ -1,10 +1,13 @@
 package cli
 
 import (
-	"context"
 	"fmt"
+	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
+	"github.com/jpeach/wotcher/pkg/event"
 	"github.com/jpeach/wotcher/pkg/k"
 
 	"github.com/spf13/cobra"
@@ -14,44 +17,56 @@ import (
 
 const Progname = "wotcher"
 
-func BuildResourceMapping(r *k.Reader) (map[string][]schema.GroupVersionKind, error) {
-	resourceMap := map[string][]schema.GroupVersionKind{}
+func BuildResourceMapping(r *k.Reader) (map[string][]schema.GroupVersionResource, error) {
+	resourceMap := map[string][]schema.GroupVersionResource{}
 
 	_, resources, err := r.Discovery.ServerGroupsAndResources()
 	if err != nil {
 		return nil, fmt.Errorf("failed to query API resources: %w", err)
 	}
 
-	for _, r := range resources {
-		gv, err := schema.ParseGroupVersion(r.GroupVersion)
+	for _, resourceList := range resources {
+		gv, err := schema.ParseGroupVersion(resourceList.GroupVersion)
 		if err != nil {
 			return nil, err
 		}
 
-		for _, k := range r.APIResources {
+		for _, resource := range resourceList.APIResources {
+			if k.IsSubResource(resource.Name) {
+				continue
+			}
+
 			// Note that we can see the same kind multiple times due to most types having
 			// status subresources. Conversely we can also see different resources with
 			// the same Kind name.
-			gvk := gv.WithKind(k.Kind)
+			gvr := gv.WithResource(resource.Name)
+			log.Printf("gvr is %q", gvr)
 			// Index by resource name.
-			resourceMap[k.Name] = append(resourceMap[k.Name], gvk)
+			resourceMap[resource.Name] = append(resourceMap[resource.Name], gvr)
 			// Index by kind name.
-			resourceMap[k.Kind] = append(resourceMap[k.Kind], gvk)
+			resourceMap[resource.Kind] = append(resourceMap[resource.Kind], gvr)
 			// Index by GroupVersion.
-			resourceMap[gv.String()] = append(resourceMap[gv.String()], gvk)
+			resourceMap[gv.String()] = append(resourceMap[gv.String()], gvr)
 			// Index by just the Group.
-			resourceMap[gv.Group] = append(resourceMap[gv.Group], gvk)
+			resourceMap[gv.Group] = append(resourceMap[gv.Group], gvr)
+			// Index by all the short names.
+			for _, short := range resource.ShortNames {
+				resourceMap[short] = append(resourceMap[short], gvr)
+			}
 		}
 	}
 
 	return resourceMap, nil
 }
 
-func WatchMatchingResources(r *k.Reader, matches []string) error {
-	resourceMap, _ := BuildResourceMapping(r)
+func InformOnMatchingResources(r *k.Reader, matches []string) error {
+	resourceMap, err := BuildResourceMapping(r)
+	if err != nil {
+		return err
+	}
 
 	// when we build the resource mapping, the same GVK can end
-	gvkSeen := map[schema.GroupVersionKind]bool{}
+	gvrSeen := map[schema.GroupVersionResource]bool{}
 
 	for _, a := range matches {
 		resources, ok := resourceMap[a]
@@ -60,13 +75,13 @@ func WatchMatchingResources(r *k.Reader, matches []string) error {
 			continue
 		}
 
-		for _, gvk := range resources {
-			if gvkSeen[gvk] {
+		for _, gvr := range resources {
+			if gvrSeen[gvr] {
 				continue
 			}
 
-			fmt.Printf("%s: informing on %q\n", Progname, gvk)
-			_, err := r.Cache.GetInformerForKind(context.Background(), gvk)
+			fmt.Printf("%s: informing on %q\n", Progname, gvr)
+			r.InformOnResource(gvr, event.NewPrinter())
 			if err != nil {
 				return err
 			}
@@ -91,11 +106,30 @@ func NewWatcher() *cobra.Command {
 				return err
 			}
 
-			if err := WatchMatchingResources(r, args); err != nil {
+			stopChan := make(chan struct{}, 2)
+			sigChan := make(chan os.Signal, 2)
+
+			signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+			go func() {
+				<-sigChan
+				close(stopChan)
+			}()
+
+			if err := InformOnMatchingResources(r, args); err != nil {
 				return err
 			}
 
-			return r.Cache.Start(context.Background())
+			// TODO: inform on all events and check
+			// whether they are for resource types that
+			// we are matching.
+
+			// TODO: inform on customresourcedefinitions
+			// resources, and check whether new CRDs match
+			// the resource types we are watching. In that
+			// case we should start new informers.
+
+			r.Run(stopChan)
+			return nil
 		},
 	}
 
