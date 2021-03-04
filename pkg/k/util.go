@@ -23,20 +23,20 @@ const (
 	DefaultResyncPeriod = 10 * time.Minute
 )
 
-// Reader provides read-only access to Kubernetes resources.
-type Reader struct {
+// Client provides read-only access to Kubernetes resources.
+type Client struct {
 	Conf            *rest.Config
 	Discovery       *discovery.DiscoveryClient
 	InformerFactory dynamicinformer.DynamicSharedInformerFactory
 }
 
-func (r *Reader) InformOnResource(gvr schema.GroupVersionResource, handler cache.ResourceEventHandler) {
-	i := r.InformerFactory.ForResource(gvr)
+func (c *Client) InformOnResource(gvr schema.GroupVersionResource, handler cache.ResourceEventHandler) {
+	i := c.InformerFactory.ForResource(gvr)
 	i.Informer().AddEventHandler(handler)
 }
 
-func (r *Reader) Run(stopChan <-chan struct{}) {
-	r.InformerFactory.Start(stopChan)
+func (c *Client) Run(stopChan <-chan struct{}) {
+	c.InformerFactory.Start(stopChan)
 
 	// Block until the channel closes and all the informers are done.
 	<-stopChan
@@ -67,10 +67,10 @@ func NewScheme(addTo ...func(*runtime.Scheme) error) *runtime.Scheme {
 	return s
 }
 
-// NewReaderForScheme returns a new informer cache that uses the given scheme.
-func NewReaderForScheme(s *runtime.Scheme) (*Reader, error) {
+// NewClient returns a new Kubernetes client.
+func NewClient() (*Client, error) {
 	var err error
-	var reader Reader
+	var reader Client
 
 	reader.Conf, err = ctrl.GetConfig()
 	if err != nil {

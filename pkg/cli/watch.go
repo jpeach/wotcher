@@ -3,7 +3,6 @@ package cli
 import (
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -13,12 +12,11 @@ import (
 
 	"github.com/spf13/cobra"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	capi "sigs.k8s.io/cluster-api/api/v1alpha3"
 )
 
 const Progname = "wotcher"
 
-func BuildResourceMapping(r *k.Reader) (map[string][]schema.GroupVersionResource, error) {
+func BuildResourceMapping(r *k.Client) (map[string][]schema.GroupVersionResource, error) {
 	resourceMap := map[string][]schema.GroupVersionResource{}
 
 	_, resources, err := r.Discovery.ServerGroupsAndResources()
@@ -41,7 +39,6 @@ func BuildResourceMapping(r *k.Reader) (map[string][]schema.GroupVersionResource
 			// status subresources. Conversely we can also see different resources with
 			// the same Kind name.
 			gvr := gv.WithResource(resource.Name)
-			log.Printf("gvr is %q", gvr)
 			// Index by resource name.
 			resourceMap[resource.Name] = append(resourceMap[resource.Name], gvr)
 			// Index by kind name.
@@ -60,7 +57,7 @@ func BuildResourceMapping(r *k.Reader) (map[string][]schema.GroupVersionResource
 	return resourceMap, nil
 }
 
-func InformOnMatchingResources(r *k.Reader, matches []string) error {
+func InformOnMatchingResources(r *k.Client, matches []string) error {
 	resourceMap, err := BuildResourceMapping(r)
 	if err != nil {
 		return err
@@ -109,8 +106,6 @@ func NewWatcher() *cobra.Command {
 		SilenceUsage:  true, // Don't emit usage on generic errors.
 		SilenceErrors: true, // Don't print errors twice.
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s := k.NewScheme(capi.AddToScheme)
-
 			// Manually parse the `kubeconfig` flag so
 			// that controller-runtime config loader can
 			// access is using the go `flag` package.
@@ -119,7 +114,7 @@ func NewWatcher() *cobra.Command {
 				StringFlagOrDie(cmd, "kubeconfig"),
 			})
 
-			r, err := k.NewReaderForScheme(s)
+			r, err := k.NewClient()
 			if err != nil {
 				return err
 			}
