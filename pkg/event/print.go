@@ -8,11 +8,21 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/cache"
 )
 
 func timestamp(when metav1.Time) string {
 	return when.Format(time.RFC3339)
+}
+
+func name(n types.NamespacedName) string {
+	// If this is a global name, we don't want to prefix it with the '/'.
+	if n.Namespace == "" {
+		return n.Name
+	}
+
+	return n.String()
 }
 
 func printOp(op string, when metav1.Time, u *unstructured.Unstructured) {
@@ -21,7 +31,7 @@ func printOp(op string, when metav1.Time, u *unstructured.Unstructured) {
 		op,
 		u.GetObjectKind().GroupVersionKind().GroupKind().Kind,
 		u.GetObjectKind().GroupVersionKind().GroupVersion(),
-		k.NamespacedNameOf(u),
+		name(k.NamespacedNameOf(u)),
 	)
 }
 
