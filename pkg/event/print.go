@@ -2,7 +2,6 @@ package event
 
 import (
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/jpeach/wotcher/pkg/k"
@@ -15,34 +14,28 @@ func timestamp(when time.Time) string {
 	return when.Format(time.RFC3339)
 }
 
-func printOp(op string, obj interface{}) {
-	kobj, ok := obj.(*unstructured.Unstructured)
-	if !ok {
-		fmt.Fprint(os.Stderr, "Failed to cast obj to metav1.Object\n")
-		return
-	}
-
+func printOp(op string, obj *unstructured.Unstructured) {
 	fmt.Printf("%s %s %s %s %s\n",
 		timestamp(time.Now()),
 		op,
-		kobj.GetObjectKind().GroupVersionKind().GroupKind().Kind,
-		kobj.GetObjectKind().GroupVersionKind().GroupVersion(),
-		k.NamespacedNameOf(kobj),
+		obj.GetObjectKind().GroupVersionKind().GroupKind().Kind,
+		obj.GetObjectKind().GroupVersionKind().GroupVersion(),
+		k.NamespacedNameOf(obj),
 	)
 }
 
 func NewPrinter() cache.ResourceEventHandler {
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			printOp("ADD", obj)
+			printOp("ADD", obj.(*unstructured.Unstructured))
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
 			if !equality.Semantic.DeepEqual(oldObj, newObj) {
-				printOp("MOD", oldObj)
+				printOp("MOD", oldObj.(*unstructured.Unstructured))
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
-			printOp("DEL", obj)
+			printOp("DEL", obj.(*unstructured.Unstructured))
 		},
 	}
 }
