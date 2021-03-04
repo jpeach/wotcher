@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jpeach/wotcher/pkg/k"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/tools/cache"
 )
@@ -36,7 +37,9 @@ func NewPrinter() cache.ResourceEventHandler {
 			printOp("ADD", obj)
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
-			printOp("MOD", oldObj)
+			if !equality.Semantic.DeepEqual(oldObj, newObj) {
+				printOp("MOD", oldObj)
+			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			printOp("DEL", obj)
